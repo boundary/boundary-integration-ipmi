@@ -86,7 +86,9 @@ public class IPMIPoller extends Application<IPMIPollerConfiguration> {
          * Create metrics
          */
         for (MonitoredMetric.Metric m : metrics.values()) {
-            metricsClient.createMetric(m, (int) config.pollFrequency.toSeconds()*1000);
+            if (!metricsClient.createMetric(m, (int) config.pollFrequency.toSeconds()*1000)) {
+                metricsClient.bevent("ipmi", "Create/Update Metric Failed", "Couldn't create or update the metric %s".format(m.name));
+            }
         }
 
         environment.lifecycle().manage(new Managed() {

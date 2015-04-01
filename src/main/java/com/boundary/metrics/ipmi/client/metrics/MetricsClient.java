@@ -2,6 +2,7 @@ package com.boundary.metrics.ipmi.client.metrics;
 
 import com.boundary.metrics.ipmi.poller.MonitoredMetric;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Charsets;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
@@ -23,7 +24,9 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+import java.util.Vector;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
@@ -59,6 +62,7 @@ public class MetricsClient {
     private final WebResource baseResource;
     private final AsyncWebResource asyncWebResource;
     private final String auth;
+    private final ObjectMapper mapper;
 
     private static final Joiner PATH_JOINER = Joiner.on('/');
     private static final Logger LOG = LoggerFactory.getLogger(MetricsClient.class);
@@ -69,14 +73,48 @@ public class MetricsClient {
         this.baseResource = client.resource(baseUrl);
         this.asyncWebResource = client.asyncResource(baseUrl);
         this.auth = "Basic " + new String(Base64.encode(user + ":" + token), Charsets.US_ASCII);
+        this.mapper = new ObjectMapper();
     }
 
-    public void createMetric(MonitoredMetric.Metric metric, int pollFrequency) {
+    public static class BoundaryResponse {
+        public static class Success {
+            public boolean success;
+        }
+        public Success result;
+    }
+
+    public boolean createMetric(MonitoredMetric.Metric metric, int pollFrequency) {
+        boolean result = false;
         ClientResponse response = baseResource.path(PATH_JOINER.join("v1", "metrics", metric.name))
-                .header(HttpHeaders.AUTHORIZATION, auth)
-                .entity(new UpdateMetric(metric, pollFrequency), MediaType.APPLICATION_JSON_TYPE)
-                .put(ClientResponse.class);
+        .header(HttpHeaders.AUTHORIZATION, auth)
+        .entity(new UpdateMetric(metric, pollFrequency), MediaType.APPLICATION_JSON_TYPE)
+        .put(ClientResponse.class);
+        try {
+            BoundaryResponse br = mapper.readValue(response.getEntity(String.class), BoundaryResponse.class);
+            result = br.result.success;
+        }
+        catch (Exception e) {}
         response.close();
+        return result;
+    }
+
+    public void bevent(String source, String title, String message) {
+        Map<String, Object> eMap = new HashMap<String, Object>();
+        Map<String, String> sMap = new HashMap<String, String>();
+        List<String> fpList = new Vector<String>();
+        sMap.put("type", "host");
+        sMap.put("ref", source);
+        eMap.put("source", sMap);
+        eMap.put("title", title);
+        eMap.put("message", message);
+        fpList.add("@title");
+        fpList.add("@message");
+        eMap.put("fingerprintFields", fpList);
+        baseResource.path("v1/events")
+        .header(HttpHeaders.AUTHORIZATION, auth)
+        .entity(eMap, MediaType.APPLICATION_JSON_TYPE)
+        .post(ClientResponse.class)
+        .close();
     }
 
     public void addMeasurements(List<MonitoredMetric> metrics, Map<Integer, Number> measurements, Optional<DateTime> optionalTimestamp) {
